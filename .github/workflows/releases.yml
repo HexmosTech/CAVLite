@@ -21,10 +21,10 @@ jobs:
         with:
           files: |
             cavlite
-            cavlite.conf
-            filter
+            config/cavlite.conf
+            lib/filter
             install.sh
-            config/clamd.conf
-            config/freshclam.conf
+            config/clamav/clamd.conf
+            config/clamav/freshclam.conf
           generate_release_notes: true
           fail_on_unmatched_files: true

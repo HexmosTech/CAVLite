@@ -2,6 +2,12 @@
 
 VERSION="0.0.4"
 
+# Enforce Sudo
+if [ "$EUID" -ne 0 ]; then
+    echo "❌ Error: This script must be run as root."
+    exit 1
+fi
+
 # Setup
 # --- CONFIGURATION START ---
 # Default values
@@ -13,18 +19,25 @@ if [ -f "/etc/cavlite/cavlite.conf" ]; then
     source "/etc/cavlite/cavlite.conf"
 fi
 
+# Set defaults if not provided in config
+: "${SCAN_PATH:=/}"
+: "${QUARANTINE_DIR:=/var/quarantine}"
+
 # Paths
 LOG_DIR="/var/log"
 LOG_FILE="$LOG_DIR/security_audit.log"
 PID_FILE="/var/run/security_audit.pid"
-QUARANTINE_DIR="/var/quarantine"
-SCAN_PATH="/"
 CLEANER_SCRIPT="/usr/local/lib/cavlite/filter"
 # --- CONFIGURATION END ---
 
 function send_notification() {
     local content="$1"
     local file_to_attach="$2"
+
+    if [ -z "$WEBHOOK_URL" ]; then
+        echo "⚠️  Warning: WEBHOOK_URL is not set. Skipping notification."
+        return
+    fi
 
     read -r -d '' PAYLOAD <<EOF
 {
@@ -39,6 +52,18 @@ EOF
     fi
 }
 
+function check_discord() {
+    echo "🔍 Checking Discord Webhook configuration..."
+    if [ -z "$WEBHOOK_URL" ]; then
+        echo "❌ Error: WEBHOOK_URL is not configured in /etc/cavlite/cavlite.conf"
+        exit 1
+    fi
+
+    echo "📨 Sending test notification..."
+    send_notification "✅ **Test Notification**: cavlite webhook is working correctly on $SERVER_NAME."
+    echo "✅ Test notification sent. Please check your Discord channel."
+}
+
 function start_scan() {
     if [ -f "$PID_FILE" ]; then
         echo "Scan is already in progress (PID: $(cat $PID_FILE)). Exiting."
@@ -51,19 +76,20 @@ function start_scan() {
     [ -f "$LOG_FILE" ] && mv "$LOG_FILE" "${LOG_FILE}.old"
 
     echo $$ >"$PID_FILE"
-    trap 'rm -f "$PID_FILE"; sudo systemctl stop clamav-daemon &>/dev/null' EXIT
+    trap 'rm -f "$PID_FILE"; systemctl stop clamav-daemon &>/dev/null' EXIT
 
     # Start logging
     TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
     echo "🔐 Security Audit Started - $TIMESTAMP on $SERVER_NAME" | tee "$LOG_FILE"
+    echo "📂 Scanning Path: $SCAN_PATH" | tee -a "$LOG_FILE"
 
-    echo "Starting clamav-daemon..." | tee -a "$LOG_FILE"
-    sudo systemctl start clamav-daemon
+    echo "Starting clamav-daemon..." >> "$LOG_FILE"
+    systemctl start clamav-daemon
 
     # Wait for clamav-daemon to start (timeout 30 minutes)
     for i in {1..180}; do 
         if systemctl is-active --quiet clamav-daemon; then
-            echo "clamav-daemon started successfully." | tee -a "$LOG_FILE"
+            echo "clamav-daemon started successfully." >> "$LOG_FILE"
             break
         fi
         sleep 10
@@ -75,18 +101,18 @@ function start_scan() {
         exit 1
     fi
 
-    echo "Running ClamAV scan on $SERVER_NAME..." | tee -a "$LOG_FILE"
+    echo "Running ClamAV scan on $SERVER_NAME..." >> "$LOG_FILE"
     mkdir -p "$QUARANTINE_DIR"
     
     # --- TARGET FOLDER IS SET HERE ---
     clamscan -r "$SCAN_PATH" --infected --move="$QUARANTINE_DIR" 2>&1 | tee -a "$LOG_FILE"
     CLAM_EXIT=${PIPESTATUS[0]}
 
-    echo -e "\nRunning Lynis audit..." | tee -a "$LOG_FILE"
-    lynis audit system | tee -a "$LOG_FILE"
+    echo -e "\nRunning Lynis audit..." >> "$LOG_FILE"
+    lynis audit system >> "$LOG_FILE"
     LYNIS_EXIT=${PIPESTATUS[0]}
 
-    echo -e "\nCleaning up log file..." | tee -a "$LOG_FILE"
+    echo -e "\nCleaning up log file..." >> "$LOG_FILE"
     CLEANED_LOG_FILE=$(python3 "$CLEANER_SCRIPT" "$LOG_FILE")
 
     if [[ -n "$CLEANED_LOG_FILE" && -f "$CLEANED_LOG_FILE" ]]; then
@@ -105,8 +131,10 @@ function start_scan() {
     # --- MARKER: THIS PREVENTS DOUBLE NOTIFICATIONS ---
     echo "### SCAN_FINISHED_NOTIFICATION_SENT ###" >> "$LOG_FILE"
 
-    echo "Stopping clamav-daemon..." | tee -a "$LOG_FILE"
-    sudo systemctl stop clamav-daemon
+    echo "Stopping clamav-daemon..." >> "$LOG_FILE"
+    systemctl stop clamav-daemon
+    
+    echo "✅ Scan completed. Logs available at $LOG_FILE"
 }
 
 function stop_scan() {
@@ -130,9 +158,9 @@ function stop_scan() {
     fi
 
     if [ "$SILENT_STOP" = true ]; then
-        sudo pkill -9 clamscan 2>/dev/null
-        sudo pkill -9 lynis 2>/dev/null
-        sudo systemctl stop clamav-daemon 2>/dev/null
+        pkill -9 clamscan 2>/dev/null
+        pkill -9 lynis 2>/dev/null
+        systemctl stop clamav-daemon 2>/dev/null
         if [ -f "$PID_FILE" ]; then
             kill "$(cat "$PID_FILE")" 2>/dev/null
             rm -f "$PID_FILE"
@@ -146,19 +174,19 @@ function stop_scan() {
     # 1. KILL CLAMSCAN
     if pgrep "clamscan" > /dev/null; then
         echo "Found running clamscan process. Killing it..."
-        sudo pkill -9 clamscan
+        pkill -9 clamscan
     fi
 
     # 2. KILL LYNIS
     if pgrep "lynis" > /dev/null; then
         echo "Found running Lynis process. Killing it..."
-        sudo pkill -9 lynis
+        pkill -9 lynis
     fi
 
     # 3. Stop the daemon
     if systemctl is-active --quiet clamav-daemon; then
         echo "Stopping clamav-daemon..."
-        sudo systemctl stop clamav-daemon
+        systemctl stop clamav-daemon
     fi
 
     # 4. Kill the script PID
@@ -202,10 +230,11 @@ function stop_scan() {
 }
 
 function show_help() {
-    echo "Usage: $0 {--start|--stop|--help|-h}"
-    echo "  --start      Start the security scan (ClamAV and Lynis)."
-    echo "  --stop       Stop any running security scan."
-    echo "  --help, -h   Display this help message."
+    echo "Usage: $0 {--start|--stop|--check-discord|--help|-h}"
+    echo "  --start          Start the security scan (ClamAV and Lynis)."
+    echo "  --stop           Stop any running security scan."
+    echo "  --check-discord  Test Discord webhook configuration."
+    echo "  --help, -h       Display this help message."
 }
 
 case "$1" in
@@ -214,6 +243,9 @@ case "$1" in
     ;;
 --stop)
     stop_scan
+    ;;
+--check-discord)
+    check_discord
     ;;
 --help|-h)
     show_help
