@@ -25,12 +25,12 @@ This approach gives you the speed of the daemon without the permanent memory foo
 `CAVLite` performs a security audit by :
 
 1. **Checks**: Verifies root privileges and ensures no other scan is running.
-2. **Daemon Startup**: Starts `clamav-daemon` and waits for it to load the virus definitions.
+2. **Daemon Startup & Config**: Starts `clamav-daemon` and injects exclusion paths dynamically into `/etc/clamav/clamd.conf`.
 3. **Security Scan**:
-    * Runs **[ClamAV](https://www.clamav.net/)** using the daemon to scan files.
+    * Runs **[ClamAV](https://www.clamav.net/)** using the daemon to scan files, respecting the injected exclusions.
     * Moves infected files to the quarantine directory (`/var/quarantine` by default).
     * Runs **[Lynis](https://cisofy.com/lynis/)** for a system-wide security audit.
-4. **Cleanup**: Stops `clamav-daemon` to release RAM back to the system.
+4. **Cleanup**: Stops `clamav-daemon` and cleans up the configuration file to restore original state.
 5. **Reporting**: Generates a summary log and sends a notification (if configured).
 
 ## Installation
@@ -74,7 +74,7 @@ sudo CAVLite [COMMAND]
 Configuration is loaded from `/etc/CAVLite/CAVLite.conf`.
 
 ```bash
-# /etc/CAVLite/CAVLite.conf
+# /etc/cavlite/cavlite.conf
 
 # Discord Webhook URL for notifications
 WEBHOOK_URL="https://discord.com/api/webhooks/..."
@@ -84,10 +84,13 @@ SCAN_PATH="/"
 
 # Directory to move infected files
 QUARANTINE_DIR="/var/quarantine"
+
+# Paths to exclude from scanning (Space separated elements)
+EXCLUDE_PATHS=("/proc")
+
 ```
 
 ## Credits
-
 
 ## License
 
