@@ -14,7 +14,15 @@ fi
 WEBHOOK_URL=""
 SERVER_NAME=$(hostname -s)
 
-# Load external configuration
+# Load configuration
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+# 1. Load local config (Development)
+if [ -f "$SCRIPT_DIR/config/cavlite.conf" ]; then
+    source "$SCRIPT_DIR/config/cavlite.conf"
+fi
+
+# 2. Load system config (Production - Overrides local)
 if [ -f "/etc/cavlite/cavlite.conf" ]; then
     source "/etc/cavlite/cavlite.conf"
 fi
@@ -22,6 +30,7 @@ fi
 # Set defaults if not provided in config
 : "${SCAN_PATH:=/}"
 : "${QUARANTINE_DIR:=/var/quarantine}"
+
 
 # Paths
 LOG_DIR="/var/log"
@@ -82,6 +91,9 @@ function start_scan() {
     TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
     echo "🔐 Security Audit Started - $TIMESTAMP on $SERVER_NAME" | tee "$LOG_FILE"
     echo "📂 Scanning Path: $SCAN_PATH" | tee -a "$LOG_FILE"
+    if [ -n "${EXCLUDE_PATHS+x}" ]; then
+        echo "🚫 Excluded Paths: ${EXCLUDE_PATHS[*]}" | tee -a "$LOG_FILE"
+    fi
 
     echo "Starting clamav-daemon..." >> "$LOG_FILE"
     systemctl start clamav-daemon
@@ -105,7 +117,18 @@ function start_scan() {
     mkdir -p "$QUARANTINE_DIR"
     
     # --- TARGET FOLDER IS SET HERE ---
-    clamscan -r "$SCAN_PATH" --infected --move="$QUARANTINE_DIR" 2>&1 | tee -a "$LOG_FILE"
+    # Construct find arguments for exclusions
+    FIND_OPTS=()
+    if [ -n "${EXCLUDE_PATHS+x}" ]; then
+        for path in "${EXCLUDE_PATHS[@]}"; do
+            FIND_OPTS+=("-path" "$path" "-prune" "-o")
+        done
+    fi
+
+    # Run find, execute clamdscan on found files
+    # Using -exec ... {} + passes multiple files to clamdscan at once
+    # echo "🐞 Debug: Executing find \"$SCAN_PATH\" ${FIND_OPTS[*]} -type f ..." | tee -a "$LOG_FILE"
+    find "$SCAN_PATH" "${FIND_OPTS[@]}" -type f -exec clamdscan --multiscan --fdpass --infected --move="$QUARANTINE_DIR" {} + 2>&1 | tee -a "$LOG_FILE"
     CLAM_EXIT=${PIPESTATUS[0]}
 
     echo -e "\nRunning Lynis audit..." >> "$LOG_FILE"
