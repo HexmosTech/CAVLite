@@ -76,24 +76,27 @@ function update_clamd_config() {
         echo "🔄 Restarting clamav-daemon to apply configuration..." | tee -a "$LOG_FILE"
         systemctl stop clamav-daemon.socket 2>/dev/null
         systemctl restart clamav-daemon
-        
-        # Wait for daemon to be ready and SOCKET to exist
-        local socket_path=$(grep "LocalSocket " "$CLAMD_CONF" | awk '{print $2}')
-        # Default fallback
-        [ -z "$socket_path" ] && socket_path="/var/run/clamav/clamd.ctl"
+    fi
+}
 
-        echo "⏳ Waiting for ClamAV daemon to initialize..." | tee -a "$LOG_FILE"
-        for i in {1..60}; do 
-            if [ -S "$socket_path" ]; then
-                echo "✅ ClamAV daemon is ready." | tee -a "$LOG_FILE"
-                break
-            fi
-            sleep 2
-        done
-        
-        if [ ! -S "$socket_path" ]; then
-             echo "⚠️  Warning: ClamAV socket ($socket_path) not found after timeout. Scan might fail." | tee -a "$LOG_FILE"
+function wait_for_clamd() {
+    # Wait for daemon to be ready and SOCKET to exist
+    local socket_path=$(grep "LocalSocket " "$CLAMD_CONF" | awk '{print $2}')
+    # Default fallback
+    [ -z "$socket_path" ] && socket_path="/var/run/clamav/clamd.ctl"
+
+    echo "⏳ Waiting for ClamAV daemon to initialize..." | tee -a "$LOG_FILE"
+    for i in {1..60}; do 
+        if [ -S "$socket_path" ]; then
+            echo "✅ ClamAV daemon is ready." | tee -a "$LOG_FILE"
+            return 0
         fi
+        sleep 2
+    done
+    
+    if [ ! -S "$socket_path" ]; then
+         echo "⚠️  Warning: ClamAV socket ($socket_path) not found after timeout. Scan might fail." | tee -a "$LOG_FILE"
+         return 1
     fi
 }
 
@@ -156,6 +159,15 @@ function start_scan() {
     # Inject configuration
     update_clamd_config
 
+    # Ensure daemon is running (important if no exclusions were set/updated)
+    if ! systemctl is-active --quiet clamav-daemon; then
+         echo "🚀 Starting clamav-daemon..." | tee -a "$LOG_FILE"
+         systemctl start clamav-daemon
+    fi
+
+    # Wait for socket
+    wait_for_clamd
+
 
     echo "Running ClamAV scan on $SERVER_NAME..." >> "$LOG_FILE"
     
@@ -174,7 +186,7 @@ function start_scan() {
     
     # --- TARGET FOLDER IS SET HERE ---
     # Run clamdscan directly on the path. The daemon handles exclusions via config.
-    clamdscan --multiscan --fdpass "$SCAN_PATH" --move="$QUARANTINE_DIR" 2>&1 | tee -a "$LOG_FILE"
+    clamdscan --verbose --multiscan --fdpass "$SCAN_PATH" --move="$QUARANTINE_DIR" 2>&1 | tee -a "$LOG_FILE"
     CLAM_EXIT=${PIPESTATUS[0]}
 
     echo -e "\nRunning Lynis audit..." >> "$LOG_FILE"
