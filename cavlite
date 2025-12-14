@@ -62,12 +62,11 @@ function update_clamd_config() {
         echo "⚙️ Injecting exclusions into $CLAMD_CONF..." | tee -a "$LOG_FILE"
         
         {
-            echo ""
             echo "### CAVlite Start"
             for path in "${EXCLUDE_PATHS[@]}"; do
                 # Escape special characters for regex if necessary, but simple paths are usually safe
                 # ExcludePath expects a regex
-                echo "ExcludePath ^$path"
+                echo "ExcludePath $path"
             done
             echo "### CAVlite END"
         } >> "$CLAMD_CONF"
@@ -171,23 +170,11 @@ function start_scan() {
 
     echo "Running ClamAV scan on $SERVER_NAME..." >> "$LOG_FILE"
     
-    # Count files to scan (for reporting confidence)
-    echo "🔍 Calculating files to scan..." | tee -a "$LOG_FILE"
-    FIND_OPTS=()
-    if [ -n "${EXCLUDE_PATHS+x}" ]; then
-        for path in "${EXCLUDE_PATHS[@]}"; do
-            FIND_OPTS+=("-path" "$path" "-prune" "-o")
-        done
-    fi
-    FILE_COUNT=$(find "$SCAN_PATH" "${FIND_OPTS[@]}" -type f -print 2>/dev/null | wc -l)
-    echo "📄 Found $FILE_COUNT files to scan." | tee -a "$LOG_FILE"
-
     mkdir -p "$QUARANTINE_DIR"
     
     # --- TARGET FOLDER IS SET HERE ---
     # Run clamdscan directly on the path. The daemon handles exclusions via config.
-    clamdscan --verbose --multiscan --fdpass / --move="$QUARANTINE_DIR" --stream --stdout
- 2>&1 | tee -a "$LOG_FILE"
+    clamdscan --multiscan --fdpass / --move="$QUARANTINE_DIR" --stream --stdout 2>&1 | tee -a "$LOG_FILE"
     CLAM_EXIT=${PIPESTATUS[0]}
 
     echo -e "\nRunning Lynis audit..." >> "$LOG_FILE"
