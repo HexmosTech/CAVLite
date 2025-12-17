@@ -54,9 +54,10 @@ function cleanup_clamd_config() {
             # Remove the block from Start to End
             sed -i '/### CAVlite Start/,/### CAVlite END/d' "$CLAMD_CONF"
             
-            # Restart daemon to apply cleanup
-            systemctl stop clamav-daemon.socket 2>/dev/null
-            systemctl restart clamav-daemon
+            # Restart daemon to apply cleanup - REMOVED to prevent double restarts/hangs
+            # The daemon is either restarted in update_clamd_config or stopped at end of scan.
+            # systemctl stop clamav-daemon.socket 2>/dev/null
+            # systemctl restart clamav-daemon
         fi
     fi
 }
