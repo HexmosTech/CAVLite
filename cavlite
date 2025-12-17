@@ -41,7 +41,8 @@ fi
 : "${LOG_FILE:=/var/log/cavlite}"
 LOG_DIR="$LOG_FILE"
 LOG_FILE="$LOG_DIR/$(date +%A | tr '[:upper:]' '[:lower:]').log"
-PID_FILE="/var/run/security_audit.pid"
+PID_FILE="/var/run/cavlite.pid"
+STATE_FILE="/var/run/cavlite.logpath"
 CLEANER_SCRIPT="/usr/local/lib/cavlite/filter"
 CLAMD_CONF="/etc/clamav/clamd.conf"
 # --- CONFIGURATION END ---
@@ -151,7 +152,8 @@ function start_scan() {
     # Log rotation is handled by day-based filenames (overwrites previous week)
 
     echo $$ >"$PID_FILE"
-    trap 'cleanup_clamd_config; rm -f "$PID_FILE"; systemctl stop clamav-daemon &>/dev/null' EXIT
+    echo "$LOG_FILE" > "$STATE_FILE"
+    trap 'cleanup_clamd_config; rm -f "$PID_FILE" "$STATE_FILE"; systemctl stop clamav-daemon &>/dev/null' EXIT
 
     # Start logging
     TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
@@ -236,6 +238,11 @@ function start_scan() {
 }
 
 function stop_scan() {
+    # Attempt to load the correctly dated log file from the running process state
+    if [ -f "$STATE_FILE" ]; then
+        LOG_FILE=$(cat "$STATE_FILE")
+    fi
+
     # Ensure config is cleaned up even on stop
     cleanup_clamd_config
 
@@ -266,7 +273,7 @@ function stop_scan() {
         pkill -9 lynis 2>/dev/null
         if [ -f "$PID_FILE" ]; then
             kill "$(cat "$PID_FILE")" 2>/dev/null
-            rm -f "$PID_FILE"
+            rm -f "$PID_FILE" "$STATE_FILE"
         fi
         exit 0
     fi
@@ -311,7 +318,7 @@ function stop_scan() {
             echo "Terminating script manager (PID: $SCAN_PID)..."
             kill "$SCAN_PID"
         fi
-        rm -f "$PID_FILE"
+        rm -f "$PID_FILE" "$STATE_FILE"
     fi
     
     # 5. Send Interrupted Notification
