@@ -38,7 +38,11 @@ LOG_DIR="$LOG_FILE"
 LOG_FILE="$LOG_DIR/$(date +%A | tr '[:upper:]' '[:lower:]').log"
 PID_FILE="/var/run/cavlite.pid"
 STATE_FILE="/var/run/cavlite.logpath"
-CLEANER_SCRIPT="/usr/local/lib/cavlite/filter"
+if [ -f "$SCRIPT_DIR/lib/filter" ]; then
+    CLEANER_SCRIPT="$SCRIPT_DIR/lib/filter"
+else
+    CLEANER_SCRIPT="/usr/local/lib/cavlite/filter"
+fi
 CLAMD_CONF="/etc/clamav/clamd.conf"
 # --- CONFIGURATION END ---
 

@@ -98,7 +98,8 @@ def create_simple_report(input_file):
         report_file = os.path.abspath(report_file)
 
         # Create simple report content
-        report_content = f"""🔐 SECURITY AUDIT - SIMPLE REPORT ON {clamav_results['hostname']}
+        prefix = "@everyone Found Infected file please check these files. It will be present in `/var/quarantine`\n\n" if clamav_results["has_malware"] else ""
+        report_content = f"""{prefix}🔐 SECURITY AUDIT - SIMPLE REPORT ON {clamav_results['hostname']}
 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
 MALWARE DETECTION:

@@ -5,6 +5,8 @@
 # Extract current version from cavlite script
 VERSION := $(shell grep 'VERSION=' cavlite | cut -d '"' -f 2)
 
+.PHONY: bump version test
+
 bump:
 	@echo "------------------------------------------------"
 	@echo "Current Version: $(VERSION)"
@@ -53,3 +55,7 @@ bump:
 
 version:
 	@echo $(VERSION)
+
+test:
+	@chmod +x test/test-cavlite
+	@./test/test-cavlite
