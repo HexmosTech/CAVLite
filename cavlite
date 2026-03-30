@@ -104,8 +104,8 @@ function wait_for_clamd() {
     local max_retries=$((CLAMD_TIMEOUT / sleep_interval))
 
     for ((i=1; i<=max_retries; i++)); do
-        # --ping returns exit code 0 only when the daemon is fully loaded and ready
-        if clamdscan --ping > /dev/null 2>&1; then
+        # --ping 1 successfully asks the daemon if it's ready
+        if clamdscan --ping 1 > /dev/null 2>&1; then
             echo "✅ ClamAV daemon is fully ready." | tee -a "$LOG_FILE"
             return 0
         fi
