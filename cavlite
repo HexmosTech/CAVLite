@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="0.2.1"
+VERSION="0.2.2"
 
 
 # Setup
@@ -30,6 +30,7 @@ fi
 # Set defaults if not provided in config
 : "${SCAN_PATH:=/}"
 : "${QUARANTINE_DIR:=/var/quarantine}"
+: "${CLAMD_TIMEOUT:=300}"
 
 
 # Paths
@@ -97,24 +98,22 @@ function update_clamd_config() {
 }
 
 function wait_for_clamd() {
-    # Wait for daemon to be ready and SOCKET to exist
-    local socket_path=$(grep "LocalSocket " "$CLAMD_CONF" | awk '{print $2}')
-    # Default fallback
-    [ -z "$socket_path" ] && socket_path="/var/run/clamav/clamd.ctl"
+    echo "⏳ Waiting for ClamAV daemon to load signatures into memory (timeout: ${CLAMD_TIMEOUT}s)..." | tee -a "$LOG_FILE"
+    
+    local sleep_interval=2
+    local max_retries=$((CLAMD_TIMEOUT / sleep_interval))
 
-    echo "⏳ Waiting for ClamAV daemon to initialize..." | tee -a "$LOG_FILE"
-    for i in {1..60}; do 
-        if [ -S "$socket_path" ]; then
-            echo "✅ ClamAV daemon is ready." | tee -a "$LOG_FILE"
+    for ((i=1; i<=max_retries; i++)); do
+        # --ping returns exit code 0 only when the daemon is fully loaded and ready
+        if clamdscan --ping > /dev/null 2>&1; then
+            echo "✅ ClamAV daemon is fully ready." | tee -a "$LOG_FILE"
             return 0
         fi
-        sleep 2
+        sleep $sleep_interval
     done
     
-    if [ ! -S "$socket_path" ]; then
-         echo "⚠️  Warning: ClamAV socket ($socket_path) not found after timeout. Scan might fail." | tee -a "$LOG_FILE"
-         return 1
-    fi
+    echo "⚠️  Warning: ClamAV daemon did not respond to ping after ${CLAMD_TIMEOUT} seconds. Scan might fail." | tee -a "$LOG_FILE"
+    return 1
 }
 
 function send_notification() {
