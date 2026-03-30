@@ -180,6 +180,21 @@ function start_scan() {
 
     # --- CLAMAV SCAN ---
     if [[ "${CLAMDSCAN}" == "True" ]]; then
+        echo "Running ClamAV scan on $SERVER_NAME..." >> "$LOG_FILE"
+        echo "🔍 Calculating files to scan..." | tee -a "$LOG_FILE"
+        
+        # Stop ClamAV temporarily and clear cache to free up RAM for the file count
+        systemctl stop clamav-daemon 2>/dev/null
+        sync; echo 3 > /proc/sys/vm/drop_caches
+        
+        if [ ${#EXCLUDE_PATHS[@]} -eq 0 ]; then
+            FILE_COUNT=$(find "$SCAN_PATH" -type f 2>/dev/null | wc -l)
+        else
+            COMBINED_REGEX=$(IFS="|"; echo "${EXCLUDE_PATHS[*]}")
+            FILE_COUNT=$(find "$SCAN_PATH" -type f 2>/dev/null | grep -vE "$COMBINED_REGEX" | wc -l)
+        fi
+        echo "📄 Found $FILE_COUNT files to scan." | tee -a "$LOG_FILE"
+
         # Inject configuration
         update_clamd_config
 
@@ -191,21 +206,11 @@ function start_scan() {
 
         # Wait for socket
         wait_for_clamd
-
-        echo "Running ClamAV scan on $SERVER_NAME..." >> "$LOG_FILE"
-        echo "🔍 Calculating files to scan..." | tee -a "$LOG_FILE"
-        if [ ${#EXCLUDE_PATHS[@]} -eq 0 ]; then
-            FILE_COUNT=$(find "$SCAN_PATH" -type f 2>/dev/null | wc -l)
-        else
-            COMBINED_REGEX=$(IFS="|"; echo "${EXCLUDE_PATHS[*]}")
-            FILE_COUNT=$(find "$SCAN_PATH" -type f 2>/dev/null | grep -vE "$COMBINED_REGEX" | wc -l)
-        fi
-        echo "📄 Found $FILE_COUNT files to scan." | tee -a "$LOG_FILE"
         
         mkdir -p "$QUARANTINE_DIR"
         
         # Run clamdscan
-        clamdscan --multiscan --fdpass "$SCAN_PATH" --move="$QUARANTINE_DIR" --stdout 2>&1 | tee -a "$LOG_FILE"
+        clamdscan --multiscan --fdpass "$SCAN_PATH" --move="$QUARANTINE_DIR" --stdout 2>&1 | tee -a "$LOG_FILE" || true
         CLAM_EXIT=${PIPESTATUS[0]}
     else
         echo "ℹ️  ClamAV scan skipped (Disabled in config)" | tee -a "$LOG_FILE"
